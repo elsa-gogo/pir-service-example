@@ -38,7 +38,16 @@ extension TestClientProtocol {
                 message: String(data: Data(buffer: response.body), encoding: .utf8) ??
                     "<\(response.body.readableBytes) bytes of binary response>")
         }
-        return try Response(serializedBytes: Array(buffer: response.body))
+
+        do {
+            let responseBytes = Array(buffer: response.body)
+            return try Response(serializedBytes: responseBytes)
+        } catch {
+            // Optional debug logging (comment out for production)
+            // print("Failed to parse protobuf response for \(path): \(error)")
+            // print("Response bytes: \(Array(buffer: response.body).prefix(100))")
+            throw error
+        }
     }
 }
 

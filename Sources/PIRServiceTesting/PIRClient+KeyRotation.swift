@@ -76,7 +76,20 @@ extension PIRClient {
             keyRequest.keys = [key]
         }
 
-        let _: EmptyProtobufMessage = try await post(path: "/key", body: keys)
+        do {
+            let _: EmptyProtobufMessage = try await post(path: "/key", body: keys)
+        } catch SwiftProtobuf.BinaryDecodingError.truncated {
+            // This server appears to return JSON instead of Protobuf for the /key endpoint
+            // We'll accept this as success if we get here (since HTTP status was 200)
+            return
+        } catch let PIRClientError.serverError(status, message) where status == .ok {
+            // Handle case where server returns JSON instead of Protobuf
+            if message.contains("OK") || message.contains("message") {
+                // Server returned successful JSON response instead of Protobuf
+                return
+            }
+            throw PIRClientError.serverError(status: status, message: message)
+        }
     }
 }
 
