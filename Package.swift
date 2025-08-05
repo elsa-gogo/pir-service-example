@@ -27,6 +27,7 @@ let package = Package(
     products: [
         .executable(name: "PIRService", targets: ["PIRService"]),
         .executable(name: "ConstructDatabase", targets: ["ConstructDatabase"]),
+        .executable(name: "PIRClientTool", targets: ["PIRClientTool"]),
         .library(name: "PrivacyPass", targets: ["PrivacyPass"]),
         .library(name: "PIRServiceTesting", targets: ["PIRServiceTesting"]),
     ],
@@ -72,6 +73,15 @@ let package = Package(
                 .product(name: "SwiftProtobuf", package: "swift-protobuf"),
             ],
             exclude: ["protobuf"],
+            swiftSettings: swiftSettings),
+        .executableTarget(
+            name: "PIRClientTool",
+            dependencies: [
+                "PIRServiceTesting", "Util",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "HomomorphicEncryption", package: "swift-homomorphic-encryption"),
+                .product(name: "PrivateInformationRetrieval", package: "swift-homomorphic-encryption"),
+            ],
             swiftSettings: swiftSettings),
         .target(
             name: "PrivacyPass",
