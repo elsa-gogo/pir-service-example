@@ -161,10 +161,13 @@ public struct PIRClient<PIRClient: IndexPirClient> {
             }
         }
 
+        print("[DEBUG] PIRClient.request: Sending request to /queries with \(requests.requests.count) requests")
         let responses: Apple_SwiftHomomorphicEncryption_Api_Pir_V1_Responses = try await post(
             path: "/queries",
             body: requests)
 
+        print("[DEBUG] PIRClient.request: Received \(responses.responses.count) responses")
+        
         return try zip(keywords, responses.responses).map { keyword, response in
             let client = try keywordPIRClient(for: keyword, config: config, context: context)
             return try client.decrypt(
@@ -211,9 +214,12 @@ public struct PIRClient<PIRClient: IndexPirClient> {
                 }
             }
         }
+        print("[DEBUG] PIRClient.symmetricPirRequest: Sending OPRF request to /queries with \(requests.requests.count) requests")
         let responses: Apple_SwiftHomomorphicEncryption_Api_Pir_V1_Responses = try await post(
             path: "/queries",
             body: requests)
+        print("[DEBUG] PIRClient.symmetricPirRequest: Received \(responses.responses.count) OPRF responses")
+        
         let parsedOprfResponses: [OprfClient.ParsedOprfOutput] = try zip(responses.responses, oprfQueryContexts)
             .map { response, queryContext in
                 let oprfResponse = try response.oprfResponse.native()

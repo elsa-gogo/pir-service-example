@@ -70,87 +70,130 @@ struct PIRClientTool: AsyncParsableCommand {
         print("查詢電話號碼: \(phoneNumber)")
         print("使用案例: \(usecase)")
         print("查詢方式: \(symmetric ? "對稱 PIR" : "傳統 PIR")")
-        if let userToken = userToken {
+        if userToken != nil {
             print("使用 Privacy Pass 驗證")
         }
         print("平台: \(platform)")
         print("---")
         
         let httpClient = HTTPClient(baseURL: url)
-        var pirClient = PIRClient<MulPirClient<Bfv<UInt32>>>(
-            connection: httpClient,
-            platform: platformEnum,
-            userToken: userToken
-        )
+        let keyword = Array(phoneNumber.utf8)
         
+        // 實作 UInt32/UInt64 fallback 機制，類似 pir-service-example 的策略
         do {
-            let keyword = Array(phoneNumber.utf8)
-            print("正在獲取配置...")
-            
-            // 先嘗試取得配置來檢查連接
-            if pirClient.configCache[usecase] == nil {
-                do {
-                    try await pirClient.rotateKey(for: usecase)
-                    print("✅ 成功獲取配置")
-                } catch {
-                    print("❌ 獲取配置失敗: \(error)")
-                    throw error
-                }
-            }
-            
-            print("正在執行查詢...")
-            let result: [KeywordValuePair.Value?]
-            
-            if symmetric {
-                result = try await pirClient.symmetricPirRequest(
-                    keywords: [keyword],
-                    usecase: usecase,
-                    allowKeyRotation: false
-                )
-            } else {
-                result = try await pirClient.request(
-                    keywords: [keyword],
-                    usecase: usecase,
-                    allowKeyRotation: false
-                )
-            }
-            
-            if let value = result.first {
-                if let value = value {
-                    let resultString = String(data: Data(value), encoding: .utf8) ?? 
-                        "<\(value.count) bytes 的二進制回應>"
-                    print("✅ 查詢成功！")
-                    print("結果: \(resultString)")
-                } else {
-                    print("❌ 查詢成功，但沒有找到該電話號碼的資料")
-                }
-            } else {
-                print("❌ 查詢失敗：沒有回應")
-            }
-            
-        } catch let error as PIRClientError {
-            print("❌ PIR 客戶端錯誤:")
-            switch error {
-            case .serverError(let status, let message):
-                print("伺服器錯誤 (\(status)): \(message)")
-            case .missingConfiguration:
-                print("缺少配置，請確認使用案例名稱是否正確")
-            case .missingSecretKey(let hash):
-                print("缺少密鑰 (hash: \(hash.map { String(format: "%02x", $0) }.joined()))")
-            case .failedToFetchToken(let status, let message):
-                print("獲取令牌失敗 (\(status)): \(message)")
-            case .failedToFetchTokenPublicKey(let status, let message):
-                print("獲取令牌公鑰失敗 (\(status)): \(message)")
-            default:
-                print("\(error)")
-            }
+            print("嘗試使用 UInt32 參數...")
+            try await performPIRQuery(
+                httpClient: httpClient,
+                keyword: keyword,
+                usecase: usecase,
+                symmetric: symmetric,
+                platform: platformEnum,
+                userToken: userToken,
+                scalarType: UInt32.self
+            )
         } catch {
-            print("❌ 錯誤: \(error)")
-            if let urlError = error as? URLError {
-                print("URL 錯誤代碼: \(urlError.code)")
-                print("錯誤描述: \(urlError.localizedDescription)")
+            print("UInt32 失敗: \(error)")
+            print("嘗試使用 UInt64 參數...")
+            
+            do {
+                try await performPIRQuery(
+                    httpClient: httpClient,
+                    keyword: keyword,
+                    usecase: usecase,
+                    symmetric: symmetric,
+                    platform: platformEnum,
+                    userToken: userToken,
+                    scalarType: UInt64.self
+                )
+            } catch let uint64Error as PIRClientError {
+                print("❌ UInt64 也失敗，PIR 客戶端錯誤:")
+                handlePIRClientError(uint64Error)
+                throw uint64Error
+            } catch {
+                print("❌ UInt64 失敗: \(error)")
+                throw error
             }
-            print("完整錯誤: \(String(reflecting: error))")
         }
+    }
+    
+    /// 處理 PIR 客戶端錯誤的通用方法
+    private func handlePIRClientError(_ error: PIRClientError) {
+        switch error {
+        case .serverError(let status, let message):
+            print("伺服器錯誤 (\(status)): \(message)")
+        case .missingConfiguration:
+            print("缺少配置，請確認使用案例名稱是否正確")
+        case .missingSecretKey(let hash):
+            print("缺少密鑰 (hash: \(hash.map { String(format: "%02x", $0) }.joined()))")
+        case .failedToFetchToken(let status, let message):
+            print("獲取令牌失敗 (\(status)): \(message)")
+        case .failedToFetchTokenPublicKey(let status, let message):
+            print("獲取令牌公鑰失敗 (\(status)): \(message)")
+        default:
+            print("\(error)")
+        }
+    }
+}
+
+/// 通用的 PIR 查詢執行函數，支援泛型 scalar type
+private func performPIRQuery<T: ScalarType>(
+    httpClient: HTTPClient,
+    keyword: [UInt8],
+    usecase: String,
+    symmetric: Bool,
+    platform: Platform,
+    userToken: String?,
+    scalarType: T.Type
+) async throws {
+    var pirClient = PIRClient<MulPirClient<Bfv<T>>>(
+        connection: httpClient,
+        platform: platform,
+        userToken: userToken
+    )
+    
+    print("正在獲取配置...")
+    
+    // 先嘗試取得配置來檢查連接和參數兼容性
+    if pirClient.configCache[usecase] == nil {
+        do {
+            try await pirClient.rotateKey(for: usecase)
+            print("✅ 成功獲取配置 (使用 \(T.self) 參數)")
+        } catch {
+            print("❌ 獲取配置失敗: \(error)")
+            throw error
+        }
+    }
+    
+    print("正在執行查詢...")
+    print("[DEBUG] 開始 \(symmetric ? "對稱 PIR" : "傳統 PIR") 查詢 (使用 \(T.self) 參數)")
+    let result: [KeywordValuePair.Value?]
+    
+    if symmetric {
+        result = try await pirClient.symmetricPirRequest(
+            keywords: [keyword],
+            usecase: usecase,
+            allowKeyRotation: false
+        )
+    } else {
+        result = try await pirClient.request(
+            keywords: [keyword],
+            usecase: usecase,
+            allowKeyRotation: false
+        )
+    }
+    
+    print("[DEBUG] 查詢完成，收到 \(result.count) 個結果")
+    
+    if let value = result.first {
+        if let value = value {
+            let resultString = String(data: Data(value), encoding: .utf8) ?? 
+                "<\(value.count) bytes 的二進制回應>"
+            print("✅ 查詢成功！(使用 \(T.self) 參數)")
+            print("結果: \(resultString)")
+        } else {
+            print("❌ 查詢成功，但沒有找到該電話號碼的資料")
+        }
+    } else {
+        print("❌ 查詢失敗：沒有回應")
     }
 }
